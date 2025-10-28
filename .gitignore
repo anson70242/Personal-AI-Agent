@@ -1,0 +1,7 @@
+# python caches
+__pycache__/
+*.pyc
+.env
+venv/
+
+postgres-data/
