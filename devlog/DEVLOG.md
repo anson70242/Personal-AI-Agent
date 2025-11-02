@@ -14,7 +14,7 @@
 2. Update `docker-compose.yml`:
 
    ```yaml
-   version: '3.8' # commendlly used version
+   version: '3.8' # commonly used version
    
    services:
      nginx:
@@ -26,21 +26,21 @@
        # For .env
        environment:
            # read gpu server ip from .env
-           # Create a env_ver inside Nginx container
+           # Create a env var inside Nginx container
            - GPU_SERVER_IP=${GPU_SERVER_IP}
    ```
 
    
 
-3. Update `nginx/nignx.conf`:
+3. Update `nginx/nginx.conf`:
 
-   - Rename `nginx/nignx.conf` to `nginx/default.conf.template`
+   - Rename `nginx/nginx.conf` to `nginx/nginx.conf.template`
 
      ```sh
      mv nginx/nginx.conf nginx/nginx.conf.template
      ```
 
-   - Modify `nginx/default.conf.template`:
+   - Modify `nginx/nginx.conf.template`:
 
      ```conf
      server {
@@ -91,7 +91,7 @@
 
    
 
-5. Restart docker container
+5. Restart docker containers
 
    ```sh
    docker-compose down
@@ -100,7 +100,7 @@
 
 ---
 
-**Today Goal 2:** Setup the vllm server, configure nginx to forward LLM api request to vllm server.
+**Today Goal 2:** Set up the vLLM server, configure Nginx to forward LLM API requests to the vLLM server.
 
 First, `ssh` to the GPU server.
 
@@ -110,7 +110,7 @@ First, `ssh` to the GPU server.
   sudo apt install docker.io docker-compose -y
   ```
 
-- Installing the NVIDIA Container Toolkit (With `apt`: Ubuntu, Debian) for vllm container [Source](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- Installing the NVIDIA Container Toolkit (With `apt`: Ubuntu, Debian) for the vllm container [Source](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
   1. Install the prerequisites for the instructions below:
 
@@ -162,16 +162,16 @@ First, `ssh` to the GPU server.
      ```
 
 
-Second, deploy vllm container:
+Second, deploy the  vLLm container:
 
-1. Export your huggingface token:
+1. Export your Hugging Face token:
    ```sh
    export HF_TOKEN="#your hf token here"
    ```
 
 2. Use vLLM's Official Docker Image
 
-   Create a volume `hf-cache` to avoid permission problem.
+   Create a volume `hf-cache` to avoid permission problems when the container (running as root) writes to the host filesystem, and to better manage the cache lifecycle.
 
    ```sh
    docker volume create hf-cache
@@ -190,11 +190,13 @@ Second, deploy vllm container:
 
    For Multi GPU:
 
-   Add `--tensor-parallel-size 2` to split model into multiple GPU like `Llama 3 70B`.
+   Add `--tensor-parallel-size 2` to **split a model** into multiple GPUs like `Llama 3 70B`.
 
-   Add `--data-parallel-size 2` to load whole model into each GPU for more **Throughput** like `Qwen3-0.6B`.
+   Add `--data-parallel-size 2` to load the whole model into each GPU for **more throughput** like `Qwen3-0.6B`.
 
-   ***Note: A Workstation motherboard is required for multi-gpu commication.**
+   ***Note: A Workstation motherboard is required for multi-GPU communication.**
+
+   *Note: Use `--env "CUDA_VISIBLE_DEVICES=0"` or remove this line if you have only 1 GPU.
 
 3. Testing:
 
@@ -243,7 +245,7 @@ Second, deploy vllm container:
   * Docker Compose file:
   
     ```yaml
-    version: '3.8' # commendlly used version
+    version: '3.8' # commonly used version
     
     services:
       nginx:
@@ -261,9 +263,9 @@ Second, deploy vllm container:
 ### Progress
 * **Service (`nginx`):** Nginx is now functioning. It's serving a static `index.html` test page, accessible from the public IP (Port 80).
 
-    * For `nginx`, I created 3 file: 
+    * For `nginx`, I created 3 files: 
 
-        * Dockerfile, create the nginx continer.
+        * Dockerfile, to create the nginx container.
 
             ```dockerfile
             # Use the official Nginx image as the base image
@@ -276,7 +278,7 @@ Second, deploy vllm container:
             COPY index.html /usr/share/nginx/html
             ```
         
-        * nginx.conf, for custom configuraction.
+        * nginx.conf, for custom configuration.
         
             ```conf
             server {
