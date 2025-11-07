@@ -1,4 +1,85 @@
 # App Server Stack - DevLog
+## 2025-11-07 - Day 4
+
+**Today Goal:** Add `api_key` for vLLM server
+
+### For vLLM server
+
+1. Stop and remove current vLLM container:
+
+   ```sh
+   docker stop my_vllm_container
+   docker rm my_vllm_container
+   ```
+
+2. Restart the container with `--api-key`
+
+   ```sh
+   docker run -d --runtime nvidia --gpus all \
+   --name my_vllm_container \
+   -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+   -v /model/huggingface/hub:/model/huggingface/hub \
+   --env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
+   --env "CUDA_VISIBLE_DEVICES=1" \
+   -p 8000:8000 \
+   --ipc=host \
+   vllm/vllm-openai:latest \
+   --model unsloth/gpt-oss-20b \
+   --api-key "f3a8...e9d2"
+   ```
+
+### For app-stack Server
+
+3. Update `nginx/nginx.conf.template`
+
+   From:
+
+   ```sh
+   # --- API Key Check ---
+   if ($http_api_key != "${LLM_API_KEY}") {
+       return 401 'Unauthorized';
+   }
+   # --- End of Check ---
+   ```
+
+   To:
+
+   ```sh
+   # --- API Key Check ---
+   # Check if the incoming request has an 'Api-Key' HTTP Header
+   # Bearer means owner, tell server the following in api-key
+   set $expected_auth "Bearer ${LLM_API_KEY}";
+   
+   if ($http_authorization != $expected_auth) {
+   	return 401 'Unauthorized';
+   }  
+   # --- End of Check ---
+   ```
+
+4. Restart Nginx container:
+   ```sh
+   docker-compose down
+   docker-compose up --build -d
+   ```
+5. Test **both real and fake `api-key`** with `curl`:
+
+   ```sh
+   curl -X POST "http://Nginx_Server_IP/llm_api/chat/completions" \
+   -H "Content-Type: application/json" \
+   -H "Authorization: Bearer f3a8...e9d2" \
+   -d '{
+       "model": "unsloth/gpt-oss-20b",
+       "messages": [
+           {
+               "role": "user",
+               "content": "What is the capital of France?"
+           }
+       ]
+   }'
+   ```
+
+   
+
 ## 2025-11-06 - Day 3 and 2025-11-07 - Day 4
 
 **Today Goal 1:** Switching the model to `gpt-oss-20b`
@@ -10,15 +91,15 @@ docker stop $(docker ps -q --filter ancestor=vllm/vllm-openai:latest)
 Deploy the new container for `gpt-oss-20b`:
 ```sh
 docker run -d --runtime nvidia --gpus all \
-	--name my_vllm_container \
-    -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-    -v /model/huggingface/hub:/model/huggingface/hub \
-    --env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
-    --env "CUDA_VISIBLE_DEVICES=1" \
-    -p 8000:8000 \
-    --ipc=host \
-    vllm/vllm-openai:latest \
-    --model unsloth/gpt-oss-20b
+--name my_vllm_container \
+-v $HOME/.cache/huggingface:/root/.cache/huggingface \
+-v /model/huggingface/hub:/model/huggingface/hub \
+--env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
+--env "CUDA_VISIBLE_DEVICES=1" \
+-p 8000:8000 \
+--ipc=host \
+vllm/vllm-openai:latest \
+--model unsloth/gpt-oss-20b
 ```
 Add `-v /model/huggingface/hub:/model/huggingface/hub` only if your system have symlink on `~/.cache/huggingface`.
 
@@ -296,13 +377,13 @@ Second, deploy the  vLLm container:
 
    ```sh
 docker run -d --runtime nvidia --gpus all \
-       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
-       --env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
-       --env "CUDA_VISIBLE_DEVICES=1" \
-    -p 8000:8000 \
-       --ipc=host \
-       vllm/vllm-openai:latest \
-       --model Qwen/Qwen3-0.6B
+   -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+   --env "HUGGING_FACE_HUB_TOKEN=$HF_TOKEN" \
+   --env "CUDA_VISIBLE_DEVICES=1" \
+   -p 8000:8000 \
+   --ipc=host \
+   vllm/vllm-openai:latest \
+   --model Qwen/Qwen3-0.6B
    ```
    
    For Multi GPU:
