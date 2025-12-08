@@ -1,6 +1,7 @@
 version: '3.8' # commendlly used version
 
 services:
+  # 1. Gateway
   nginx:
     build: ./nginx # indicate the path to the Dockerfile
     ports:
@@ -13,3 +14,36 @@ services:
       # Create a env_ver inside Nginx container
       - GPU_SERVER_IP=${GPU_SERVER_IP}
       - LLM_API_KEY=${LLM_API_KEY}
+
+  # 2. Agent Brain
+  agent_service:
+    build: ./agent_service
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # vLLM server info from .env
+      - GPU_SERVER_IP=${GPU_SERVER_IP}
+      - LLM_API_KEY=${LLM_API_KEY}
+      # Database info from .env
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+
+  # 3. Memory Database Service  
+  db:
+    build: ./database
+    container_name: agent_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

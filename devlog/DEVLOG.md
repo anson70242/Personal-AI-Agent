@@ -1,4 +1,13 @@
 # App Server Stack - DevLog
+## 2025-12-08 - Day 5
+*Note: Since I don't have as much time as before, I will keep the devlog simple but on point from today (unlike my previous extremely detailed logs).*
+
+**Today's Goal:** Implement persistent chat memory for the LLM using FastAPI and PostgreSQL.
+
+1. **Database Setup:** Configured PostgreSQL with SQLAlchemy for automatic table initialization and UUID generation.
+2. **API Routing:** Configured Nginx to route traffic to the new Agent Service, ensuring every conversation is tracked via a unique session ID.
+3. **Auto-Maintenance:** Implemented a background scheduler (APScheduler) to automatically delete old sessions on a weekly basis.
+
 ## 2025-11-07 - Day 4
 
 **Today Goal:** Add `api_key` for vLLM server
