@@ -22,7 +22,7 @@ server {
 
         # Forward the request to the GPU server, rewriting the path.
         # Example: /llm_api/chat -> /v1/chat
-        proxy_pass http://${GPU_SERVER_IP}:8000/v1/;
+        proxy_pass http://agent_service:80;
 
         # Pass the original 'Host' header from the client to the upstream server
         proxy_set_header Host $host;
