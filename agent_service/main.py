@@ -1,32 +1,56 @@
 import os
-import requests
-from fastapi import FastAPI, Depends, HTTPException, Header
+import httpx
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import List, Optional
-from database import SessionLocal, DbSession, DbMessage
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
 
-from datetime import datetime, timedelta  # Added for time calculation
-from apscheduler.schedulers.background import BackgroundScheduler # Added for scheduling tasks
+# Import local modules
+from database import SessionLocal
+import schemas
+import crud
+# import rag # Reserved for future use
 
-app = FastAPI()
+# --- Configuration ---
+GPU_SERVER_IP = os.getenv("GPU_SERVER_IP")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+VLLM_TIMEOUT = 60.0
 
-# --- Pydantic Models (Input Validation) ---
+# --- Lifecycle Management ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles startup and shutdown events.
+    Initializes the background scheduler for cleanup tasks.
+    """
+    scheduler = BackgroundScheduler()
+    
+    # Wrapper function to create a DB session for the scheduler
+    def scheduled_cleanup():
+        print("[Auto-Cleanup] Starting cleanup task...")
+        with SessionLocal() as db:
+            try:
+                count = crud.cleanup_expired_sessions(db)
+                if count > 0:
+                    print(f"[Auto-Cleanup] Deleted {count} expired sessions.")
+            except Exception as e:
+                print(f"[Auto-Cleanup] Error: {e}")
 
-class MessageParam(BaseModel):
-    role: str
-    content: str
+    # Run cleanup daily
+    scheduler.add_job(scheduled_cleanup, 'interval', days=1)
+    scheduler.start()
+    
+    yield # Application runs here
+    
+    # Shutdown logic
+    scheduler.shutdown()
 
-class ChatRequest(BaseModel):
-    model: str
-    messages: List[MessageParam]
-    # Optional session_id to continue a conversation
-    session_id: Optional[str] = None 
+app = FastAPI(lifespan=lifespan)
 
-# --- Dependency: Database Session Management ---
+# --- Dependency ---
 def get_db():
     """
-    Creates a new database session for each request and closes it afterwards.
+    Creates a new database session for each request.
     """
     db = SessionLocal()
     try:
@@ -34,158 +58,79 @@ def get_db():
     finally:
         db.close()
 
-
-
-# --- Background Task: Auto-Cleanup Logic ---
-def cleanup_old_sessions():
-    """
-    Background task to delete sessions older than 7 days.
-    
-    Logic:
-    1. Calculate the expiration date (current time - 7 days).
-    2. Delete sessions created before this date.
-    3. Due to 'cascade="all, delete"' in database.py, 
-       messages associated with these sessions are automatically deleted.
-    """
-    print("[Auto-Cleanup] Starting cleanup task...")
-    db = SessionLocal()
-    try:
-        # Define retention period: 7 days
-        expiration_date = datetime.utcnow() - timedelta(days=7)
-        
-        # Query and delete expired sessions
-        deleted_count = db.query(DbSession).filter(DbSession.created_at < expiration_date).delete()
-        db.commit()
-        
-        if deleted_count > 0:
-            print(f"[Auto-Cleanup] Successfully deleted {deleted_count} expired sessions.")
-        else:
-            print("[Auto-Cleanup] No expired sessions found.")
-            
-    except Exception as e:
-        print(f"[Auto-Cleanup] Error occurred during cleanup: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-# --- Scheduler Initialization ---
-
-# Initialize the background scheduler
-scheduler = BackgroundScheduler()
-
-# Schedule the cleanup job to run once every 24 hours (interval)
-# You can change 'days=1' to 'minutes=1' for testing purposes
-scheduler.add_job(cleanup_old_sessions, 'interval', days=1)
-
-# Start the scheduler
-scheduler.start()
-
-# Ensure the scheduler shuts down when the app exits
-@app.on_event("shutdown")
-def shutdown_event():
-    scheduler.shutdown()
-
-
-
 # --- API Endpoints ---
+
 @app.post("/llm_api/chat/completions")
-async def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
+async def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     
-    # 1. Determine Session ID (Context Management)
-    session_id = request.session_id
-    db_session = None
+    # 1. Manage Session (Get existing or create new)
+    session_id = crud.get_or_create_session(db, request.session_id)
 
-    if session_id:
-        # Try to retrieve existing session
-        db_session = db.query(DbSession).filter(DbSession.session_id == session_id).first()
-    
-    if not db_session:
-        # If no ID provided or session not found, create a new one
-        db_session = DbSession(title="New Conversation")
-        db.add(db_session)
-        db.commit()
-        db.refresh(db_session)
-        session_id = str(db_session.session_id)
-
-    # 2. Save User's New Message (Short-term Memory Write)
-    # Assume the last message in the list is the new user input
+    # 2. Save User's Message to DB
     last_user_msg = request.messages[-1]
-    
     if last_user_msg.role == 'user':
-        user_db_msg = DbMessage(
-            session_id=session_id,
-            role="user",
-            content=last_user_msg.content
-        )
-        db.add(user_db_msg)
-        db.commit()
+        crud.save_message(db, session_id, "user", last_user_msg.content)
 
-    # 3. Retrieve Context (Memory Retrieval)
-    # Fetch the last 20 messages from this session to provide context
-    history = db.query(DbMessage).filter(DbMessage.session_id == session_id)\
-                .order_by(DbMessage.created_at.asc())\
-                .limit(20).all()
+    # 3. Retrieve Context (History)
+    context_messages = crud.get_chat_history(db, session_id)
     
-    # Format history for vLLM
-    context_messages = [{"role": msg.role, "content": msg.content} for msg in history]
+    # (Optional) Future RAG integration point:
+    # docs = rag.retrieve_documents(last_user_msg.content)
+    # context_messages.append({"role": "system", "content": f"Context: {docs}"})
 
-    # 4. Call vLLM Backend (Inference)
-    gpu_ip = os.getenv("GPU_SERVER_IP")
-    api_key = os.getenv("LLM_API_KEY")
-    
-    # Use the internal port 8000 of the GPU server
-    # Ensure strict error handling
-    if not gpu_ip:
+    # 4. Call vLLM Backend (Non-blocking Async Call)
+    if not GPU_SERVER_IP:
         raise HTTPException(status_code=500, detail="GPU_SERVER_IP not configured")
 
-    vllm_url = f"http://{gpu_ip}:8000/v1/chat/completions"
-    
+    vllm_url = f"http://{GPU_SERVER_IP}:8000/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {LLM_API_KEY}"
     }
     
+    # Construct payload for vLLM
     payload = {
         "model": request.model,
-        "messages": context_messages # Pass the full context with memory
+        "messages": context_messages
     }
 
     try:
-        # Forward request to vLLM
-        response = requests.post(vllm_url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        ai_data = response.json()
-        
-        # Extract AI content
+        # Use httpx for asynchronous HTTP requests
+        async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
+            response = await client.post(vllm_url, headers=headers, json=payload)
+            response.raise_for_status() # Raise exception for 4xx/5xx errors
+            ai_data = response.json()
+            
         ai_content = ai_data['choices'][0]['message']['content']
-        
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"vLLM Connection Error: {str(e)}")
 
-    # 5. Save AI's Response (Short-term Memory Write)
-    ai_db_msg = DbMessage(
-        session_id=session_id,
-        role="assistant",
-        content=ai_content
-    )
-    db.add(ai_db_msg)
-    db.commit()
+    except httpx.HTTPStatusError as e:
+         raise HTTPException(status_code=e.response.status_code, detail=f"vLLM Provider Error: {e.response.text}")
+    except httpx.RequestError as e:
+         raise HTTPException(status_code=500, detail=f"vLLM Connection Failed: {str(e)}")
+
+    # 5. Save AI's Response to DB
+    crud.save_message(db, session_id, "assistant", ai_content)
 
     # 6. Return Response with Session ID
-    # Attach session_id so the frontend knows which session to continue
     ai_data['session_id'] = session_id
     return ai_data
 
-
-
-# --- Additional Endpoints for Session Management ---
 @app.get("/llm_api/sessions")
 def get_sessions(db: Session = Depends(get_db)):
-    sessions = db.query(DbSession).all()
-    return sessions
+    """
+    Retrieve all available sessions.
+    """
+    from database import DbSession # Local import to avoid circular dependency if expanded
+    return db.query(DbSession).all()
 
 @app.get("/llm_api/sessions/{session_id}/messages")
 def get_session_messages(session_id: str, db: Session = Depends(get_db)):
+    """
+    Retrieve all messages for a specific session.
+    """
+    # Re-use the logic from crud, or write a custom query if we need all messages (not just limit 20)
+    # For this endpoint, we usually want the full history.
+    from database import DbMessage
     messages = db.query(DbMessage)\
                  .filter(DbMessage.session_id == session_id)\
                  .order_by(DbMessage.created_at.asc())\

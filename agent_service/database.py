@@ -1,3 +1,4 @@
+# Setup connection and define ORM models.
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from sqlalchemy.dialects.postgresql import UUID
@@ -18,7 +19,6 @@ DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST
 engine = create_engine(DATABASE_URL)
 
 # 3. Create a SessionLocal class
-# Each instance of this class will be a database session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # 4. Base class for ORM models
@@ -38,7 +38,6 @@ class DbSession(Base):
     title = Column(Text, nullable=True)
     
     # Relationship: One Session has many Messages
-    # cascade="all, delete" ensures messages are deleted if the session is deleted
     messages = relationship("DbMessage", back_populates="session", cascade="all, delete")
 
 class DbMessage(Base):
