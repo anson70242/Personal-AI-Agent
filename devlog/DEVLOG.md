@@ -1,4 +1,10 @@
 # App Server Stack - DevLog
+## 2025-12-09 - Day 6
+
+1. **Agent Service Refactoring & Cleanup:** Refactored the Agent Service's core data processing logic, successfully simplifying several complex methods into cleaner, modular functions. This effort significantly reduced code duplication and improved the service's overall maintainability and testability.
+
+2. **Documentation Enhancement:** Added comprehensive inline documentation for all public interfaces and key methods within the Agent Service, ensuring the API usage is clear for all developers.
+
 ## 2025-12-08 - Day 5
 *Note: Since I don't have as much time as before, I will keep the devlog simple but on point from today (unlike my previous extremely detailed logs).*
 
