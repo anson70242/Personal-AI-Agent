@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database import DbSession, DbMessage
 from datetime import datetime, timedelta
 from typing import List, Optional
+from sqlalchemy import desc
 
 # Constants
 HISTORY_LIMIT = 20
@@ -35,10 +36,17 @@ def get_chat_history(db: Session, session_id: str) -> List[dict]:
     """
     Fetches the recent chat history for the LLM context.
     """
+    # newest first
     history = db.query(DbMessage)\
                 .filter(DbMessage.session_id == session_id)\
-                .order_by(DbMessage.created_at.asc())\
+                .order_by(DbMessage.created_at.desc())\
                 .limit(HISTORY_LIMIT).all()
+
+    if not history:
+        return []
+
+    # return oldest first
+    history.reverse()
     
     return [{"role": msg.role, "content": msg.content} for msg in history]
 
